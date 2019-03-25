@@ -41,13 +41,13 @@ const abortIndex int8 = math.MaxInt8 / 2
 // Context is the most important part of gin. It allows us to pass variables between middleware,
 // manage the flow, validate the JSON of a request and render a JSON response for example.
 type Context struct {
-	writermem responseWriter
+	writermem responseWriter //这里会是 http 的 writer
 	Request   *http.Request
-	Writer    ResponseWriter
+	Writer    ResponseWriter //todo?? 干嘛用的
 
-	Params   Params
-	handlers HandlersChain
-	index    int8
+	Params   Params        //参数
+	handlers HandlersChain //handler 链,也是外面给 ctx 赋值的
+	index    int8          //当前运行到第几个 handler
 
 	engine *Engine
 
@@ -67,11 +67,11 @@ type Context struct {
 
 func (c *Context) reset() {
 	c.Writer = &c.writermem
-	c.Params = c.Params[0:0]
+	c.Params = c.Params[0:0] //params 是什么时候被初始化的呢?
 	c.handlers = nil
-	c.index = -1
+	c.index = -1 //reset 都是从-1开始的
 	c.Keys = nil
-	c.Errors = c.Errors[0:0]
+	c.Errors = c.Errors[0:0] //errors 也是什么时候被初始化的呢?
 	c.Accepted = nil
 }
 
@@ -82,9 +82,9 @@ func (c *Context) Copy() *Context {
 	cp.writermem.ResponseWriter = nil
 	cp.Writer = &cp.writermem
 	cp.index = abortIndex
-	cp.handlers = nil
+	cp.handlers = nil //cp后没有带责任链过去
 	cp.Keys = map[string]interface{}{}
-	for k, v := range c.Keys {
+	for k, v := range c.Keys { //重新实例化一份 map 给他,互不影响, 所以这里可以用 copy?
 		cp.Keys[k] = v
 	}
 	return &cp
@@ -119,7 +119,9 @@ func (c *Context) Handler() HandlerFunc {
 // It executes the pending handlers in the chain inside the calling handler.
 // See example in GitHub.
 func (c *Context) Next() {
-	c.index++
+	c.index++ // 为啥一上来就++, 跳过了0, 因为初始值都设置为-1
+
+	//handlers 使用 int8 所以最大只支持127个 handler
 	for c.index < int8(len(c.handlers)) {
 		c.handlers[c.index](c)
 		c.index++
@@ -136,12 +138,14 @@ func (c *Context) IsAborted() bool {
 // If the authorization fails (ex: the password does not match), call Abort to ensure the remaining handlers
 // for this request are not called.
 func (c *Context) Abort() {
+	//跳过后续的 handler 链, 直接设置 abort 即可
 	c.index = abortIndex
 }
 
 // AbortWithStatus calls `Abort()` and writes the headers with the specified status code.
 // For example, a failed attempt to authenticate a request could use: context.AbortWithStatus(401).
 func (c *Context) AbortWithStatus(code int) {
+	//abort 顺便写一个状态码
 	c.Status(code)
 	c.Writer.WriteHeaderNow()
 	c.Abort()
@@ -196,7 +200,7 @@ func (c *Context) Error(err error) *Error {
 // Set is used to store a new key/value pair exclusively for this context.
 // It also lazy initializes  c.Keys if it was not used previously.
 func (c *Context) Set(key string, value interface{}) {
-	if c.Keys == nil {
+	if c.Keys == nil { //懒加载
 		c.Keys = make(map[string]interface{})
 	}
 	c.Keys[key] = value
@@ -220,7 +224,7 @@ func (c *Context) MustGet(key string) interface{} {
 // GetString returns the value associated with the key as a string.
 func (c *Context) GetString(key string) (s string) {
 	if val, ok := c.Get(key); ok && val != nil {
-		s, _ = val.(string)
+		s, _ = val.(string) //如果断言失败了 就 panic
 	}
 	return
 }
@@ -993,6 +997,7 @@ func (c *Context) SetAccepted(formats ...string) {
 // should be canceled. Deadline returns ok==false when no deadline is
 // set. Successive calls to Deadline return the same results.
 func (c *Context) Deadline() (deadline time.Time, ok bool) {
+	//这是瞎 jb 继承,假装实现啊
 	return
 }
 

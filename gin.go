@@ -24,9 +24,11 @@ var (
 	defaultAppEngine bool
 )
 
+//主体方法
 // HandlerFunc defines the handler used by gin middleware as return value.
 type HandlerFunc func(*Context)
 
+//handler链
 // HandlersChain defines a HandlerFunc array.
 type HandlersChain []HandlerFunc
 
@@ -51,7 +53,9 @@ type RoutesInfo []RouteInfo
 
 // Engine is the framework's instance, it contains the muxer, middleware and configuration settings.
 // Create an instance of Engine, by using New() or Default()
+//gin 的引擎结构
 type Engine struct {
+	//核心路由组
 	RouterGroup
 
 	// Enables automatic redirection if the current route can't be matched but a
@@ -59,6 +63,7 @@ type Engine struct {
 	// For example if /foo/ is requested but a route only exists for /foo, the
 	// client is redirected to /foo with http status code 301 for GET requests
 	// and 307 for all other request methods.
+	//是否自动添加移除末尾斜线 给到301从定向
 	RedirectTrailingSlash bool
 
 	// If enabled, the router tries to fix the current request path, if no
@@ -70,6 +75,7 @@ type Engine struct {
 	// all other request methods.
 	// For example /FOO and /..//Foo could be redirected to /foo.
 	// RedirectTrailingSlash is independent of this option.
+	//自动修复路由
 	RedirectFixedPath bool
 
 	// If enabled, the router checks if another method is allowed for the
@@ -78,6 +84,7 @@ type Engine struct {
 	// and HTTP status code 405.
 	// If no other Method is allowed, the request is delegated to the NotFound
 	// handler.
+	//是否返回405 not allow 方法
 	HandleMethodNotAllowed bool
 	ForwardedByClientIP    bool
 
@@ -95,6 +102,7 @@ type Engine struct {
 
 	// Value of 'maxMemory' param that is given to http.Request's ParseMultipartForm
 	// method call.
+	//最大内存
 	MaxMultipartMemory int64
 
 	delims           render.Delims
@@ -120,14 +128,15 @@ var _ IRouter = &Engine{}
 // - UseRawPath:             false
 // - UnescapePathValues:     true
 func New() *Engine {
+	//gin 实例化的方法
 	debugPrintWARNINGNew()
 	engine := &Engine{
-		RouterGroup: RouterGroup{
+		RouterGroup: RouterGroup{ //定义路由树根节点
 			Handlers: nil,
 			basePath: "/",
 			root:     true,
 		},
-		FuncMap:                template.FuncMap{},
+		FuncMap:                template.FuncMap{}, //todo 不知道干啥
 		RedirectTrailingSlash:  true,
 		RedirectFixedPath:      false,
 		HandleMethodNotAllowed: false,
@@ -136,12 +145,12 @@ func New() *Engine {
 		UseRawPath:             false,
 		UnescapePathValues:     true,
 		MaxMultipartMemory:     defaultMultipartMemory,
-		trees:                  make(methodTrees, 0, 9),
+		trees:                  make(methodTrees, 0, 9), //方法树, http 一共支持九种 method
 		delims:                 render.Delims{Left: "{{", Right: "}}"},
 		secureJsonPrefix:       "while(1);",
 	}
-	engine.RouterGroup.engine = engine
-	engine.pool.New = func() interface{} {
+	engine.RouterGroup.engine = engine     //路由组 你中有我 我中有你 -.-
+	engine.pool.New = func() interface{} { // context 资源池复用,传入 new 方法
 		return engine.allocateContext()
 	}
 	return engine
@@ -151,11 +160,12 @@ func New() *Engine {
 func Default() *Engine {
 	debugPrintWARNINGDefault()
 	engine := New()
-	engine.Use(Logger(), Recovery())
+	engine.Use(Logger(), Recovery()) //也就多使用了下 logger 和 recovery
 	return engine
 }
 
 func (engine *Engine) allocateContext() *Context {
+	//将 gin 实例指针传递到 context
 	return &Context{engine: engine}
 }
 
@@ -286,11 +296,13 @@ func iterate(path, method string, routes RoutesInfo, root *node) RoutesInfo {
 // Run attaches the router to a http.Server and starts listening and serving HTTP requests.
 // It is a shortcut for http.ListenAndServe(addr, router)
 // Note: this method will block the calling goroutine indefinitely unless an error happens.
+//提供 http 的入口服务的方法,gin 实例实现了ServerHttp方法
 func (engine *Engine) Run(addr ...string) (err error) {
 	defer func() { debugPrintError(err) }()
 
 	address := resolveAddress(addr)
 	debugPrint("Listening and serving HTTP on %s\n", address)
+	//这里使用的是 内置的 http 服务包,大并发的时候可能会有问题
 	err = http.ListenAndServe(address, engine)
 	return
 }
@@ -301,7 +313,7 @@ func (engine *Engine) Run(addr ...string) (err error) {
 func (engine *Engine) RunTLS(addr, certFile, keyFile string) (err error) {
 	debugPrint("Listening and serving HTTPS on %s\n", addr)
 	defer func() { debugPrintError(err) }()
-
+	//通过 tls 协议咯
 	err = http.ListenAndServeTLS(addr, certFile, keyFile, engine)
 	return
 }
@@ -331,6 +343,7 @@ func (engine *Engine) RunFd(fd int) (err error) {
 	debugPrint("Listening and serving HTTP on fd@%d", fd)
 	defer func() { debugPrintError(err) }()
 
+	//fd 是句柄,通过 fd 可以拿到File对象
 	f := os.NewFile(uintptr(fd), fmt.Sprintf("fd@%d", fd))
 	listener, err := net.FileListener(f)
 	if err != nil {
@@ -344,9 +357,10 @@ func (engine *Engine) RunFd(fd int) (err error) {
 // ServeHTTP conforms to the http.Handler interface.
 func (engine *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	c := engine.pool.Get().(*Context)
-	c.writermem.reset(w)
+	//context 资源复用
+	c.writermem.reset(w) //将请求的 w 和 req 赋值到 context 上
 	c.Request = req
-	c.reset()
+	c.reset() //拿到以后就调用 reset
 
 	engine.handleHTTPRequest(c)
 
@@ -355,8 +369,9 @@ func (engine *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 // HandleContext re-enter a context that has been rewritten.
 // This can be done by setting c.Request.URL.Path to your new target.
-// Disclaimer: You can loop yourself to death with this, use wisely.
+// Disclaimer: You can loop yourself to death with this, use wisely.  可能会导致致命的死循环
 func (engine *Engine) HandleContext(c *Context) {
+	//重新跑一遍啊?
 	oldIndexValue := c.index
 	c.reset()
 	engine.handleHTTPRequest(c)
@@ -365,10 +380,11 @@ func (engine *Engine) HandleContext(c *Context) {
 }
 
 func (engine *Engine) handleHTTPRequest(c *Context) {
-	httpMethod := c.Request.Method
-	rPath := c.Request.URL.Path
+	httpMethod := c.Request.Method //获取方法
+	rPath := c.Request.URL.Path    //获取路由
 	unescape := false
-	if engine.UseRawPath && len(c.Request.URL.RawPath) > 0 {
+
+	if engine.UseRawPath && len(c.Request.URL.RawPath) > 0 { //todo
 		rPath = c.Request.URL.RawPath
 		unescape = engine.UnescapePathValues
 	}
@@ -378,17 +394,20 @@ func (engine *Engine) handleHTTPRequest(c *Context) {
 	for i, tl := 0, len(t); i < tl; i++ {
 		if t[i].method != httpMethod {
 			continue
+			//找到对应的路有树
 		}
 		root := t[i].root
 		// Find route in tree
+		//在 trie 树中查找handler 链,并且获得参数
 		handlers, params, tsr := root.getValue(rPath, c.Params, unescape)
 		if handlers != nil {
 			c.handlers = handlers
 			c.Params = params
-			c.Next()
+			c.Next() //遍历handlers
 			c.writermem.WriteHeaderNow()
 			return
 		}
+		//如果没有 handlers 的情况  tsr 建议重定向的意思
 		if httpMethod != "CONNECT" && rPath != "/" {
 			if tsr && engine.RedirectTrailingSlash {
 				redirectTrailingSlash(c)
@@ -401,19 +420,19 @@ func (engine *Engine) handleHTTPRequest(c *Context) {
 		break
 	}
 
-	if engine.HandleMethodNotAllowed {
+	if engine.HandleMethodNotAllowed { //如果启用了这个变量,找不到的情况下,性能差很多啊
 		for _, tree := range engine.trees {
 			if tree.method == httpMethod {
 				continue
 			}
 			if handlers, _, _ := tree.root.getValue(rPath, nil, unescape); handlers != nil {
 				c.handlers = engine.allNoMethod
-				serveError(c, http.StatusMethodNotAllowed, default405Body)
+				serveError(c, http.StatusMethodNotAllowed, default405Body) //默认405处理方法
 				return
 			}
 		}
 	}
-	c.handlers = engine.allNoRoute
+	c.handlers = engine.allNoRoute //404的处理方法
 	serveError(c, http.StatusNotFound, default404Body)
 }
 
